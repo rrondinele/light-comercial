@@ -273,7 +273,7 @@ st.set_page_config(layout="wide", page_title="Dashboard de Produtividade", page_
 
 # Título
 st.title("LIGHT Comercial - Dashboard de Indicadores ")
-st.markdown("Análise de serviços da tabela `light.\"4600010296_servicos\"`")
+#st.markdown("Análise de serviços da tabela `light.\"4600010296_servicos\"`")
 
 # --- Menu lateral com filtros ---
 st.sidebar.title("🔧 Filtros e Navegação")
@@ -629,39 +629,74 @@ elif aba_selecionada == "🧰 Notas Equipamentos":
         # FILTROS ESPECÍFICOS DA ABA
         # ----------------------------
         with st.expander("🎛️ Filtros adicionais", expanded=True):
-            col1, col2, col3, col4, col5 = st.columns(5)
-
+            # Linha 1: datas + nota
+            col1, col2, col3 = st.columns(3)
             with col1:
                 data_ini_local = st.date_input(
                     "Data inicial",
                     value=data_inicio,
                     key="equip_data_ini"
                 )
-
             with col2:
                 data_fim_local = st.date_input(
                     "Data final",
                     value=data_fim,
                     key="equip_data_fim"
                 )
-
             with col3:
                 filtro_nota = st.text_input(
-                    "Nota",
+                    "Nota (+ Lista)",
                     key="filtro_nota"
                 )
 
+            # Linha 2: lote + serial
+            col4, col5 = st.columns(2)
             with col4:
                 filtro_lote = st.text_input(
-                    "Lote",
+                    "Lote (+ Lista)",
                     key="filtro_lote"
                 )
-
             with col5:
                 filtro_serial = st.text_input(
-                    "Serial",
+                    "Serial (+ Lista)",
                     key="filtro_serial"
                 )
+
+            # Linha 3: Base Operacional + Ação (multiselect)
+            col6, col7 = st.columns(2)
+
+            # Garantir que as colunas existem antes de criar as opções
+            bases_sel = []
+            acoes_sel = []
+
+            with col6:
+                if "Base Operacional" in df_equip.columns:
+                    opcoes_bases = sorted(
+                        [b for b in df_equip["Base Operacional"].dropna().unique()]
+                    )
+                    bases_sel = st.multiselect(
+                        "Base Operacional (multiseleção)",
+                        options=opcoes_bases,
+                        default=[]
+                    )
+
+            with col7:
+                # Coluna pode estar como "Ação" ou "Acao"
+                col_acao = None
+                if "Ação" in df_equip.columns:
+                    col_acao = "Ação"
+                elif "Acao" in df_equip.columns:
+                    col_acao = "Acao"
+
+                if col_acao:
+                    opcoes_acoes = sorted(
+                        [a for a in df_equip[col_acao].dropna().unique()]
+                    )
+                    acoes_sel = st.multiselect(
+                        "Ação (multiseleção)",
+                        options=opcoes_acoes,
+                        default=[]
+                    )
 
         # ----------------------------
         # APLICAÇÃO DOS FILTROS
@@ -669,7 +704,6 @@ elif aba_selecionada == "🧰 Notas Equipamentos":
         df_filtrado = df_equip.copy()
 
         # 1) Período (refino em cima da query)
-        #    A coluna "Data" vem do alias na query
         if "Data" in df_filtrado.columns:
             df_filtrado["Data"] = pd.to_datetime(df_filtrado["Data"]).dt.date
             if data_ini_local:
@@ -677,32 +711,44 @@ elif aba_selecionada == "🧰 Notas Equipamentos":
             if data_fim_local:
                 df_filtrado = df_filtrado[df_filtrado["Data"] <= data_fim_local]
 
-        # 2) Base Operacional
-        bases = ["Todas"] + sorted([b for b in df_filtrado["Base Operacional"].unique() if b])
-        base_sel = st.selectbox("Filtrar por Base Operacional:", bases)
-
-        if base_sel != "Todas":
-            df_filtrado = df_filtrado[df_filtrado["Base Operacional"] == base_sel]
-
-        # 3) Filtro por Nota (lista flexível)
+        # 2) Filtro por Nota (lista flexível)
         lista_notas = parse_multi_filter(filtro_nota)
         if lista_notas:
             df_filtrado = df_filtrado[
                 df_filtrado["Nota"].astype(str).isin(lista_notas)
             ]
 
-        # 4) Filtro por Lote (lista flexível)
+        # 3) Filtro por Lote (lista flexível)
         lista_lotes = parse_multi_filter(filtro_lote)
         if lista_lotes and "Lote" in df_filtrado.columns:
             df_filtrado = df_filtrado[
                 df_filtrado["Lote"].astype(str).isin(lista_lotes)
             ]
 
-        # 5) Filtro por Serial (lista flexível)
+        # 4) Filtro por Serial (lista flexível)
         lista_seriais = parse_multi_filter(filtro_serial)
         if lista_seriais and "Serial" in df_filtrado.columns:
             df_filtrado = df_filtrado[
                 df_filtrado["Serial"].astype(str).isin(lista_seriais)
+            ]
+
+        # 5) Filtro por Base Operacional (multiselect)
+        if bases_sel and "Base Operacional" in df_filtrado.columns:
+            df_filtrado = df_filtrado[
+                df_filtrado["Base Operacional"].isin(bases_sel)
+            ]
+
+        # 6) Filtro por Ação (multiselect)
+        if "Ação" in df_filtrado.columns:
+            col_acao = "Ação"
+        elif "Acao" in df_filtrado.columns:
+            col_acao = "Acao"
+        else:
+            col_acao = None
+
+        if col_acao and acoes_sel:
+            df_filtrado = df_filtrado[
+                df_filtrado[col_acao].isin(acoes_sel)
             ]
 
         # ----------------------------
