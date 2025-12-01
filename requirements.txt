@@ -1,6 +1,7 @@
 streamlit
 dotenv
 pandas
+openpyxl
 sqlalchemy
 python-dotenv
 psycopg2-binary
