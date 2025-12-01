@@ -1,0 +1,17 @@
+# Ambiente virtual
+venv/
+.env/
+.env
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Streamlit
+.streamlit/
+
+# Outros
+*.log
