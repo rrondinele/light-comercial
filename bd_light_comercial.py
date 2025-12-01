@@ -231,13 +231,48 @@ def fetch_ofs_equipamentos(data_inicio=None, data_fim=None):
 
     return fetch_data(query)
 
+
+@st.cache_data(ttl=300)
+def fetch_ofs_apr(data_inicio=None, data_fim=None):
+    """
+    Busca dados das Notas APR (ofs_apr + serviços)
+    """
+    query = f"""
+    SELECT 
+        s.data_servico                                     AS "Data",
+        s.recurso                                          AS "Equipe",
+        oa.numero_nota                                     AS "Nota",
+        oa.card_numero                                     AS "Nº Pergunta",
+        oa.pergunta_texto                                  AS "Pergunta",
+        oa.item_numero                                     AS "Nº Item",
+        oa.item_texto                                      AS "Item",
+        oa.resposta                                        AS "Resposta"
+    FROM {SCHEMA_NAME}.ofs_apr oa
+    LEFT JOIN {SCHEMA_NAME}.{TABLE_NAME} s 
+        ON oa.numero_nota = ltrim(s.ordem_servico, '0')
+    WHERE 1=1
+    """
+    conditions = []
+    if data_inicio:
+        conditions.append(f"s.data_servico >= '{data_inicio}'")
+    if data_fim:
+        conditions.append(f"s.data_servico <= '{data_fim}'")
+
+    if conditions:
+        query += " AND " + " AND ".join(conditions)
+
+    query += " ORDER BY s.data_servico, oa.numero_nota, oa.card_numero, oa.item_numero"
+
+    return fetch_data(query)
+
+
 # --- 3. Interface do Streamlit ---
 
 # Configuração da página
 st.set_page_config(layout="wide", page_title="Dashboard de Produtividade", page_icon="📊")
 
 # Título
-st.title("Dashboard de Produtividade de Equipes CENEGED")
+st.title("LIGHT Comercial - Dashboard de Indicadores ")
 st.markdown("Análise de serviços da tabela `light.\"4600010296_servicos\"`")
 
 # --- Menu lateral com filtros ---
@@ -246,7 +281,7 @@ st.sidebar.title("🔧 Filtros e Navegação")
 # Navegação por abas
 aba_selecionada = st.sidebar.radio(
     "Navegação:",
-    ["📊 Dashboard Geral", "🔄 Início de Turno", "🗺️ Mapa de Atividades", "🧰 Notas Equipamentos"]
+    ["📊 Dashboard Geral", "🔄 Início de Turno", "🗺️ Mapa de Atividades", "🧰 Notas Equipamentos", "📝 Notas APR"]
 )
 
 # Filtros comuns no sidebar
@@ -705,5 +740,57 @@ elif aba_selecionada == "🧰 Notas Equipamentos":
             label="📥 Download Excel (.xlsx)",
             data=excel_file,
             file_name=f"ofs_equipamentos_{data_ini_local}_a_{data_fim_local}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+elif aba_selecionada == "📝 Notas APR":
+    st.header("📝 Notas APR")
+
+    # Busca dados de APR usando o período global do sidebar
+    df_apr = fetch_ofs_apr(
+        data_inicio=data_inicio,
+        data_fim=data_fim
+    )
+
+    if df_apr.empty:
+        st.warning("⚠️ Nenhum registro de APR encontrado para o período selecionado.")
+    else:
+        # Filtros simples na própria aba (opcionais, mas úteis)
+        with st.expander("🎛️ Filtros adicionais", expanded=False):
+            col1, col2 = st.columns(2)
+            with col1:
+                equipes = ["Todas"] + sorted(df_apr["Equipe"].dropna().unique().tolist())
+                equipe_sel = st.selectbox("Filtrar por Equipe:", equipes)
+            with col2:
+                nota_sel = st.text_input("Filtrar por Nota específica (ex: 1625861939)")
+
+        df_filtrado = df_apr.copy()
+
+        if equipe_sel != "Todas":
+            df_filtrado = df_filtrado[df_filtrado["Equipe"] == equipe_sel]
+
+        if nota_sel:
+            df_filtrado = df_filtrado[df_filtrado["Nota"].astype(str) == nota_sel.strip()]
+
+        st.subheader("📋 Detalhamento das Notas APR")
+        st.dataframe(
+            df_filtrado,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        # Função auxiliar para exportar Excel
+        def apr_to_excel(df: pd.DataFrame) -> bytes:
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                df.to_excel(writer, index=False, sheet_name="Notas APR")
+            return output.getvalue()
+
+        excel_bytes = apr_to_excel(df_filtrado)
+
+        st.download_button(
+            label="📥 Download Excel (.xlsx)",
+            data=excel_bytes,
+            file_name=f"ofs_apr_{data_inicio}_a_{data_fim}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
