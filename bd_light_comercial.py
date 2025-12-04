@@ -177,10 +177,12 @@ def fetch_ofs_equipamentos(data_inicio=None, data_fim=None):
             WHEN one.material IS NULL THEN l."lote" 
             ELSE ltrim(one.material, '0') 
         END                                                                         AS "Lote",
-        CASE 
-            WHEN l.descricao IS NULL THEN one.descricao
-            ELSE l.descricao 
-        END                                                                         AS "Descricao",
+        --CASE 
+        --    WHEN l.descricao IS NOT NULL THEN l.descricao
+        --    WHEN one.descricao IS NOT NULL THEN one.descricao
+        --   ELSE one.tipo_equipamento
+        --END                                                                         as "Descricao",        
+        COALESCE(l.descricao, one.descricao, one.tipo_equipamento) 					as "Descricao",
         TRIM(BOTH ' u' FROM one.quantidade)                                         AS "Quantidade",
         ltrim(one.numero_serie, '0')                                                AS "Serial",
         one.projeto                                                                 AS "Projeto",
