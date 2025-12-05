@@ -71,27 +71,28 @@ def fetch_inicio_turno_data(data_inicio=None, data_fim=None, regional=None):
     """
     query = f"""
     SELECT 
+        s.tipo_atividade_1                                                                                      AS tipo_atividade,
         s.data_servico,
-        s.inicio_servico,
-        s.fim_servico,
+        TO_CHAR(s.inicio_servico, 'HH24:MI:SS')                                                                 AS inicio_servico,
+        TO_CHAR(s.fim_servico, 'HH24:MI:SS')                                                                    AS fim_servico,        
         s.duracao,
+        s.id_recurso,
         s.recurso,
+        s.label_veiculo,
+        split_part(s.idmatriculalider,'.',1)                                                                    AS idmatriculalider,
+        split_part(s.idmatriculaauxiliares,'.',1)                                                               AS idmatriculaauxiliares,
+        split_part(s.idmatriculaguarda,'.',1)                                                                   AS idmatriculaguarda,
         CASE 
             WHEN s.recurso LIKE '%BP%' THEN 'Barra do Piraí'
             WHEN s.recurso LIKE '%VR%' THEN 'Volta Redonda' 
             WHEN s.recurso LIKE '%TR%' THEN 'Três Rios'
             ELSE 'Outra'
-        END AS regional,
-        s.tipo_atividade_1,
-        s.id_recurso,
-        s.label_veiculo,
-        s.idmatriculalider,
-        s.idmatriculaauxiliares,
+        END                                                                                                     AS regional,
         CASE
             WHEN s.idmatriculalider IS NOT NULL AND s.idmatriculaauxiliares IS NULL THEN 'incompleta'
             ELSE 'completa'
-        END AS composicao,
-        s.idmatriculaguarda	
+        END                                                                                                     AS composicao
+        
     FROM {SCHEMA_NAME}.{TABLE_NAME} s
     WHERE 1=1 
     AND s.tipo_atividade_1 = 'Início de turno'
@@ -545,11 +546,20 @@ elif aba_selecionada == "🔄 Início de Turno":
             df_turno_filtrado = df_turno_filtrado[df_turno_filtrado['recurso'] == recurso_filtro]
         
         # Mostra tabela
+        colunas_ocultas = ["hora_inicio", "minutos_inicio", "hora_fim", "minutos_fim"]
+
+        df_exibir = df_turno_filtrado.drop(columns=[c for c in colunas_ocultas if c in df_turno_filtrado.columns])
+
         st.dataframe(
-            df_turno_filtrado,
+            df_exibir,
             use_container_width=True,
             hide_index=True
         )
+        # st.dataframe(
+        #     df_turno_filtrado,
+        #     use_container_width=True,
+        #     hide_index=True
+        # )
         
         # Botão de download
         csv = df_turno_filtrado.to_csv(index=False)
