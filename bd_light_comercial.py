@@ -182,10 +182,11 @@ def fetch_ofs_equipamentos(data_inicio=None, data_fim=None):
         --    WHEN l.descricao IS NOT NULL THEN l.descricao
         --    WHEN one.descricao IS NOT NULL THEN one.descricao
         --   ELSE one.tipo_equipamento
-        --END                                                                         as "Descricao",        
-        COALESCE(l.descricao, one.descricao, one.tipo_equipamento) 					as "Descricao",
+        --END                                                                       as "Descricao",        
+        COALESCE(l.descricao, one.descricao, one.tipo_equipamento) 					as "Descrição",
         TRIM(BOTH ' u' FROM one.quantidade)                                         AS "Quantidade",
         ltrim(one.numero_serie, '0')                                                AS "Serial",
+        vsm.motivo_final                                                            AS "Motivo Aderência",
         one.projeto                                                                 AS "Projeto",
         CASE
             WHEN 'L' || split_part(s.area_trabalho, ' - ', 2) IN (
@@ -216,6 +217,20 @@ def fetch_ofs_equipamentos(data_inicio=None, data_fim=None):
                  AND one.dados_json->>'Tipo de Lacre' = 'TRAVA' THEN '399108'
             ELSE ltrim(one.material, '0') 
         END = l."lote"
+    --LEFT JOIN (SELECT * FROM light.validacao_servico_material WHERE aderente_material = false) vsm ON vsm.id_atividade = s.id_atividade
+
+
+
+    LEFT JOIN (SELECT id_atividade, ordem_servico, BOOL_AND(aderente_material) AS aderente_material_final,
+    CASE 
+        WHEN BOOL_AND(aderente_material) = false THEN 
+            MIN(CASE WHEN aderente_material = false THEN motivo_aderencia END)
+        ELSE 'OK'
+    END AS motivo_final
+    FROM light.validacao_servico_material_codigo
+    GROUP BY id_atividade, ordem_servico
+    ) vsm on vsm.id_atividade = s.id_atividade   
+
     WHERE 1=1
     """
 
