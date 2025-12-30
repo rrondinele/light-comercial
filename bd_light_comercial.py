@@ -284,6 +284,54 @@ def fetch_ofs_apr(data_inicio=None, data_fim=None):
     return fetch_data(query)
 
 
+@st.cache_data(ttl=300)
+def fetch_medicao_servicos(data_inicio=None, data_fim=None, ordem_servico=None):
+    """
+    Busca dados de medição de serviços com filtros
+    """
+    query = f"""
+    SELECT 
+        s.id_atividade,
+        s.ordem_servico,
+        s.data_servico,
+        s.status_atividade,
+        sm.grupo_servico,
+        s.tipo_nota_servico,
+        s.tipo_atividade_1,
+        STRING_AGG(sm.codigo_mestre, ';' ORDER BY sm.codigo_mestre) AS codigos_mestre_agregados,
+        SUM(sm.valor) AS valor_total
+    FROM {SCHEMA_NAME}.{TABLE_NAME} s  
+    LEFT JOIN {SCHEMA_NAME}.servicos_medicao sm ON s.id_atividade = sm.id_atividade 
+    WHERE 1 = 1
+    """
+    
+    # Aplica filtros
+    conditions = []
+    if data_inicio:
+        conditions.append(f"s.data_servico >= '{data_inicio}'")
+    if data_fim:
+        conditions.append(f"s.data_servico <= '{data_fim}'")
+    if ordem_servico and ordem_servico != "":
+        conditions.append(f"s.ordem_servico = '{ordem_servico}'")
+    
+    if conditions:
+        query += " AND " + " AND ".join(conditions)
+    
+    query += """
+    GROUP BY 
+        s.id_atividade,
+        s.ordem_servico,
+        s.data_servico,
+        s.status_atividade,
+        sm.grupo_servico,
+        s.tipo_nota_servico,
+        s.tipo_atividade_1
+    ORDER BY s.data_servico DESC, s.ordem_servico
+    """
+    
+    return fetch_data(query)
+
+
 # --- 3. Interface do Streamlit ---
 
 # Configuração da página
@@ -299,8 +347,9 @@ st.sidebar.title("🔧 Filtros e Navegação")
 # Navegação por abas
 aba_selecionada = st.sidebar.radio(
     "Navegação:",
-    ["📊 Dashboard Geral", "🔄 Início de Turno", "🗺️ Mapa de Atividades", "🧰 Notas Equipamentos", "📝 Notas APR"]
+    ["📊 Dashboard Geral", "🔄 Início de Turno", "🗺️ Mapa de Atividades", "🧰 Notas Equipamentos", "📝 Notas APR", "📋 Medição de Serviços"]  # ← ADICIONADO AQUI
 )
+
 
 # Filtros comuns no sidebar
 st.sidebar.markdown("---")
@@ -867,3 +916,123 @@ elif aba_selecionada == "📝 Notas APR":
             file_name=f"ofs_apr_{data_inicio}_a_{data_fim}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
+elif aba_selecionada == "📋 Medição de Serviços":
+    st.header("📋 Medição de Serviços")
+    
+    # Filtros específicos para medição
+    with st.expander("🎛️ Filtros de Medição", expanded=True):
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            data_ini_med = st.date_input(
+                "Data inicial:",
+                value=data_inicio,
+                key="med_data_ini"
+            )
+            
+        with col2:
+            data_fim_med = st.date_input(
+                "Data final:",
+                value=data_fim,
+                key="med_data_fim"
+            )
+        
+        col3, col4 = st.columns(2)
+        
+        with col3:
+            # Filtro por Ordem de Serviço
+            filtro_os = st.text_input(
+                "Ordem de Serviço:",
+                placeholder="Ex: 001616474583",
+                key="filtro_os"
+            )
+    
+    # Busca dados de medição
+    df_medicao = fetch_medicao_servicos(
+        data_inicio=data_ini_med,
+        data_fim=data_fim_med,
+        ordem_servico=filtro_os if filtro_os else None
+    )
+    
+    if not df_medicao.empty:
+        # KPIs principais
+        col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
+        
+        with col_kpi1:
+            total_valor = df_medicao['valor_total'].sum()
+            st.metric("Valor Total", f"R$ {total_valor:,.2f}")
+        
+        with col_kpi2:
+            total_os = df_medicao['ordem_servico'].nunique()
+            st.metric("Ordens de Serviço", total_os)
+        
+        with col_kpi3:
+            total_atividades = df_medicao['id_atividade'].nunique()
+            st.metric("Atividades", total_atividades)
+        
+        st.divider()
+        
+        # --- TABELA COM FILTROS INTERATIVOS ---
+        st.subheader("📊 Detalhamento de Medições")
+        
+        # Renomear colunas para melhor visualização
+        df_display = df_medicao.rename(columns={
+            'id_atividade': 'ID Atividade',
+            'ordem_servico': 'Ordem Serviço',
+            'data_servico': 'Data Serviço',
+            'status_atividade': 'Status',
+            'grupo_servico': 'Grupo Serviço',
+            'tipo_nota_servico': 'Tipo Nota',
+            'tipo_atividade_1': 'Tipo Atividade',
+            'codigos_mestre_agregados': 'Códigos Mestre',
+            'valor_total': 'Valor Total (R$)'
+        })
+        
+        # Exibir tabela com filtros interativos do Streamlit
+        st.dataframe(
+            df_display,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "Valor Total (R$)": st.column_config.NumberColumn(
+                    format="R$ %.2f"
+                ),
+                "Data Serviço": st.column_config.DateColumn(
+                    format="DD/MM/YYYY"
+                )
+            }
+        )
+        
+        # --- BOTÕES DE EXPORTAÇÃO ---
+        st.divider()
+        
+        col_exp1, col_exp2 = st.columns(2)
+        
+        with col_exp1:
+            # Exportar para CSV
+            csv = df_medicao.to_csv(index=False, sep=';', decimal=',')
+            st.download_button(
+                label="📥 Download CSV",
+                data=csv,
+                file_name=f"medicao_servicos_{data_ini_med}_a_{data_fim_med}.csv",
+                mime="text/csv"
+            )
+        
+        with col_exp2:
+            # Exportar para Excel
+            output = io.BytesIO()
+            # O 'with' já cuida de salvar e fechar o arquivo automaticamente
+            with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                df_medicao.to_excel(writer, sheet_name='Medição', index=False)
+            
+            st.download_button(
+                label="📥 Download Excel",
+                data=output.getvalue(),
+                file_name=f"medicao_servicos_{data_ini_med}_a_{data_fim_med}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+    
+    else:
+        st.warning("⚠️ Nenhum dado encontrado para os filtros selecionados.")
+
