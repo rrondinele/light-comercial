@@ -326,8 +326,8 @@ def fetch_medicao_servicos(data_inicio=None, data_fim=None, ordem_servico=None):
         s.status_atividade,
         sm.grupo_servico,
         s.tipo_nota_servico,
-        s.tipo_atividade_1
-        s.cods_de_fechamento,
+        s.tipo_atividade_1,
+        s.cods_de_fechamento
     ORDER BY s.data_servico DESC, s.ordem_servico
     """
     
