@@ -298,8 +298,8 @@ def fetch_medicao_servicos(data_inicio=None, data_fim=None, ordem_servico=None):
         sm.grupo_servico,
         s.tipo_nota_servico,
         s.tipo_atividade_1,
-        sm.codigo_fechamento,
-        STRING_AGG(sm.codigo_mestre, ';' ORDER BY sm.codigo_mestre) AS codigos_mestre_agregados,
+        STRING_AGG(sm.codigo_fechamento, ';' ORDER BY sm.codigo_fechamento) AS Codigo Fechamento,
+        STRING_AGG(sm.codigo_mestre, ';' ORDER BY sm.codigo_mestre) AS Codigo Mestre,
         SUM(sm.valor) AS valor_total
     FROM {SCHEMA_NAME}.{TABLE_NAME} s  
     LEFT JOIN {SCHEMA_NAME}.servicos_medicao sm ON s.id_atividade = sm.id_atividade 
@@ -326,8 +326,7 @@ def fetch_medicao_servicos(data_inicio=None, data_fim=None, ordem_servico=None):
         s.status_atividade,
         sm.grupo_servico,
         s.tipo_nota_servico,
-        s.tipo_atividade_1,
-        sm.codigo_fechamento
+        s.tipo_atividade_1
     ORDER BY s.data_servico DESC, s.ordem_servico
     """
     
