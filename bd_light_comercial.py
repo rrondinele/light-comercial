@@ -187,7 +187,7 @@ def fetch_ofs_equipamentos(data_inicio=None, data_fim=None):
         TRIM(BOTH ' u' FROM one.quantidade)                                         AS "Quantidade",
         ltrim(one.numero_serie, '0')                                                AS "Serial",
         vsm.motivo_final                                                            AS "Motivo Aderência",
-        one.projeto                                                                 AS "Projeto",
+        --one.projeto                                                                 AS "Projeto",
         CASE
             WHEN 'L' || split_part(s.area_trabalho, ' - ', 2) IN (
                 'L700','L705','L715','L716','L717','L722','L723','L731','L742','L745',
@@ -286,9 +286,6 @@ def fetch_ofs_apr(data_inicio=None, data_fim=None):
 
 @st.cache_data(ttl=300)
 def fetch_medicao_servicos(data_inicio=None, data_fim=None, ordem_servico=None):
-    """
-    Busca dados de medição de serviços com filtros
-    """
     query = f"""
     SELECT 
         s.id_atividade,
@@ -328,8 +325,7 @@ def fetch_medicao_servicos(data_inicio=None, data_fim=None, ordem_servico=None):
         s.tipo_nota_servico,
         s.tipo_atividade_1
     ORDER BY s.data_servico DESC, s.ordem_servico
-    """
-    
+    """    
     return fetch_data(query)
 
 
@@ -706,47 +702,32 @@ elif aba_selecionada == "🧰 Notas Equipamentos":
         # FILTROS ESPECÍFICOS DA ABA
         # ----------------------------
         with st.expander("🎛️ Filtros adicionais", expanded=True):
-            # Linha 1: datas + nota
+            # Agora apenas com uma linha: nota + lote + serial
             col1, col2, col3 = st.columns(3)
             with col1:
-                data_ini_local = st.date_input(
-                    "Data inicial",
-                    value=data_inicio,
-                    key="equip_data_ini"
-                )
-            with col2:
-                data_fim_local = st.date_input(
-                    "Data final",
-                    value=data_fim,
-                    key="equip_data_fim"
-                )
-            with col3:
                 filtro_nota = st.text_input(
                     "Nota (+ Lista)",
                     key="filtro_nota"
                 )
-
-            # Linha 2: lote + serial
-            col4, col5 = st.columns(2)
-            with col4:
+            with col2:
                 filtro_lote = st.text_input(
                     "Lote (+ Lista)",
                     key="filtro_lote"
                 )
-            with col5:
+            with col3:
                 filtro_serial = st.text_input(
                     "Serial (+ Lista)",
                     key="filtro_serial"
                 )
 
-            # Linha 3: Base Operacional + Ação (multiselect)
-            col6, col7 = st.columns(2)
+            # Linha 2: Base Operacional + Ação (multiselect)
+            col4, col5 = st.columns(2)
 
             # Garantir que as colunas existem antes de criar as opções
             bases_sel = []
             acoes_sel = []
 
-            with col6:
+            with col4:
                 if "Base Operacional" in df_equip.columns:
                     opcoes_bases = sorted(
                         [b for b in df_equip["Base Operacional"].dropna().unique()]
@@ -757,7 +738,7 @@ elif aba_selecionada == "🧰 Notas Equipamentos":
                         default=[]
                     )
 
-            with col7:
+            with col5:
                 # Coluna pode estar como "Ação" ou "Acao"
                 col_acao = None
                 if "Ação" in df_equip.columns:
@@ -780,42 +761,34 @@ elif aba_selecionada == "🧰 Notas Equipamentos":
         # ----------------------------
         df_filtrado = df_equip.copy()
 
-        # 1) Período (refino em cima da query)
-        if "Data" in df_filtrado.columns:
-            df_filtrado["Data"] = pd.to_datetime(df_filtrado["Data"]).dt.date
-            if data_ini_local:
-                df_filtrado = df_filtrado[df_filtrado["Data"] >= data_ini_local]
-            if data_fim_local:
-                df_filtrado = df_filtrado[df_filtrado["Data"] <= data_fim_local]
-
-        # 2) Filtro por Nota (lista flexível)
+        # 1) Filtro por Nota (lista flexível)
         lista_notas = parse_multi_filter(filtro_nota)
         if lista_notas:
             df_filtrado = df_filtrado[
                 df_filtrado["Nota"].astype(str).isin(lista_notas)
             ]
 
-        # 3) Filtro por Lote (lista flexível)
+        # 2) Filtro por Lote (lista flexível)
         lista_lotes = parse_multi_filter(filtro_lote)
         if lista_lotes and "Lote" in df_filtrado.columns:
             df_filtrado = df_filtrado[
                 df_filtrado["Lote"].astype(str).isin(lista_lotes)
             ]
 
-        # 4) Filtro por Serial (lista flexível)
+        # 3) Filtro por Serial (lista flexível)
         lista_seriais = parse_multi_filter(filtro_serial)
         if lista_seriais and "Serial" in df_filtrado.columns:
             df_filtrado = df_filtrado[
                 df_filtrado["Serial"].astype(str).isin(lista_seriais)
             ]
 
-        # 5) Filtro por Base Operacional (multiselect)
+        # 4) Filtro por Base Operacional (multiselect)
         if bases_sel and "Base Operacional" in df_filtrado.columns:
             df_filtrado = df_filtrado[
                 df_filtrado["Base Operacional"].isin(bases_sel)
             ]
 
-        # 6) Filtro por Ação (multiselect)
+        # 5) Filtro por Ação (multiselect)
         if "Ação" in df_filtrado.columns:
             col_acao = "Ação"
         elif "Acao" in df_filtrado.columns:
@@ -850,7 +823,6 @@ elif aba_selecionada == "🧰 Notas Equipamentos":
             processed_data = output.getvalue()
             return processed_data
 
-
         st.subheader("📋 Detalhamento de Notas Equipamentos")
         st.dataframe(
             df_filtrado,
@@ -862,7 +834,7 @@ elif aba_selecionada == "🧰 Notas Equipamentos":
         st.download_button(
             label="📥 Download Excel (.xlsx)",
             data=excel_file,
-            file_name=f"ofs_equipamentos_{data_ini_local}_a_{data_fim_local}.xlsx",
+            file_name=f"ofs_equipamentos_{data_inicio}_a_{data_fim}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
 
