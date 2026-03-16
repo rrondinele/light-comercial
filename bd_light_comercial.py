@@ -329,6 +329,70 @@ def fetch_medicao_servicos(data_inicio=None, data_fim=None, ordem_servico=None):
     return fetch_data(query)
 
 
+@st.cache_data(ttl=300)
+def fetch_tempo_medio_atividade(data_inicio=None, data_fim=None, regional=None):
+    """
+    Busca dados para cálculo de tempo médio de execução e deslocamento
+    por dia, equipe e regional.
+    Considera apenas registros com ordem_servico preenchida.
+    """
+
+    query = f"""
+    SELECT
+        s.data_servico,
+        s.recurso,
+        s.ordem_servico,
+        s.tipo_atividade_1,
+        s.status_atividade,
+        s.duracao,
+        s.tempo_de_deslocamento,
+        CASE 
+            WHEN s.recurso LIKE '%BP%' THEN 'Barra do Piraí'
+            WHEN s.recurso LIKE '%VR%' THEN 'Volta Redonda'
+            WHEN s.recurso LIKE '%TR%' THEN 'Três Rios'
+            ELSE 'Outra'
+        END AS regional,
+
+        -- duração em minutos
+        CASE
+            WHEN s.duracao IS NOT NULL AND trim(s.duracao) <> ''
+            THEN
+                split_part(s.duracao, ':', 1)::numeric * 60
+                + split_part(s.duracao, ':', 2)::numeric
+            ELSE NULL
+        END AS duracao_minutos,
+
+        -- deslocamento em minutos
+        CASE
+            WHEN s.tempo_de_deslocamento IS NOT NULL AND trim(s.tempo_de_deslocamento) <> ''
+            THEN
+                split_part(s.tempo_de_deslocamento, ':', 1)::numeric * 60
+                + split_part(s.tempo_de_deslocamento, ':', 2)::numeric
+            ELSE NULL
+        END AS deslocamento_minutos
+
+    FROM {SCHEMA_NAME}.{TABLE_NAME} s
+    WHERE 1=1
+      AND s.ordem_servico IS NOT NULL
+      AND trim(s.ordem_servico) <> ''
+    """
+
+    conditions = []
+    if data_inicio:
+        conditions.append(f"s.data_servico >= '{data_inicio}'")
+    if data_fim:
+        conditions.append(f"s.data_servico <= '{data_fim}'")
+    if regional and regional != "Todas":
+        conditions.append(f"s.recurso LIKE '%{regional[:2]}%'")
+
+    if conditions:
+        query += " AND " + " AND ".join(conditions)
+
+    query += " ORDER BY s.data_servico, s.recurso"
+
+    return fetch_data(query)
+
+
 # --- 3. Interface do Streamlit ---
 
 # Configuração da página
@@ -344,7 +408,7 @@ st.sidebar.title("🔧 Filtros e Navegação")
 # Navegação por abas
 aba_selecionada = st.sidebar.radio(
     "Navegação:",
-    ["📊 Dashboard Geral", "🔄 Início de Turno", "🗺️ Mapa de Atividades", "🧰 Notas Equipamentos", "📝 Notas APR", "📋 Medição de Serviços"]  # ← ADICIONADO AQUI
+    ["📊 Dashboard Geral", "🔄 Início de Turno", "🗺️ Mapa de Atividades", "🧰 Notas Equipamentos", "📝 Notas APR", "📋 Medição de Serviços", "⏱️ Tempo Médio Atividade"]  # ← ADICIONADO AQUI
 )
 
 
@@ -1008,4 +1072,220 @@ elif aba_selecionada == "📋 Medição de Serviços":
     
     else:
         st.warning("⚠️ Nenhum dado encontrado para os filtros selecionados.")
+
+elif aba_selecionada == "⏱️ Tempo Médio Atividade":
+    st.header("⏱️ Tempo Médio das Atividades")
+
+    df_tempo = fetch_tempo_medio_atividade(
+        data_inicio=data_inicio,
+        data_fim=data_fim,
+        regional=regional_selecionada
+    )
+
+    if df_tempo.empty:
+        st.warning("⚠️ Nenhum dado encontrado para os filtros selecionados.")
+    else:
+        # Garantir tipos numéricos
+        df_tempo["duracao_minutos"] = pd.to_numeric(df_tempo["duracao_minutos"], errors="coerce")
+        df_tempo["deslocamento_minutos"] = pd.to_numeric(df_tempo["deslocamento_minutos"], errors="coerce")
+
+        # Remover negativos, se houver
+        df_tempo = df_tempo[
+            ((df_tempo["duracao_minutos"].isna()) | (df_tempo["duracao_minutos"] >= 0)) &
+            ((df_tempo["deslocamento_minutos"].isna()) | (df_tempo["deslocamento_minutos"] >= 0))
+        ]
+
+        if df_tempo.empty:
+            st.warning("⚠️ Não há registros válidos para cálculo.")
+        else:
+            # =========================
+            # KPIs GERAIS
+            # =========================
+            st.subheader("📈 Indicadores Gerais")
+
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+                media_exec = df_tempo["duracao_minutos"].mean()
+                st.metric("Tempo Médio Execução", f"{media_exec:.1f} min" if pd.notna(media_exec) else "N/A")
+
+            with col2:
+                media_desloc = df_tempo["deslocamento_minutos"].mean()
+                st.metric("Tempo Médio Deslocamento", f"{media_desloc:.1f} min" if pd.notna(media_desloc) else "N/A")
+
+            with col3:
+                total_os = df_tempo["ordem_servico"].nunique()
+                st.metric("Ordens de Serviço", total_os)
+
+            with col4:
+                total_atividades = len(df_tempo)
+                st.metric("Atividades", total_atividades)
+
+            st.divider()
+
+            # =========================
+            # POR DIA
+            # =========================
+            st.subheader("📅 Tempo Médio por Dia")
+
+            df_por_dia = (
+                df_tempo.groupby("data_servico", as_index=False)
+                .agg(
+                    tempo_medio_execucao=("duracao_minutos", "mean"),
+                    tempo_medio_deslocamento=("deslocamento_minutos", "mean"),
+                    qtd_atividades=("ordem_servico", "count"),
+                    qtd_os=("ordem_servico", "nunique")
+                )
+                .sort_values("data_servico")
+            )
+
+            st.bar_chart(
+                df_por_dia.set_index("data_servico")[["tempo_medio_execucao", "tempo_medio_deslocamento"]],
+                use_container_width=True
+            )
+
+            st.dataframe(
+                df_por_dia.rename(columns={
+                    "data_servico": "Data",
+                    "tempo_medio_execucao": "Tempo Médio Execução (min)",
+                    "tempo_medio_deslocamento": "Tempo Médio Deslocamento (min)",
+                    "qtd_atividades": "Qtd Atividades",
+                    "qtd_os": "Qtd OS"
+                }),
+                use_container_width=True,
+                hide_index=True
+            )
+
+            st.divider()
+
+            # =========================
+            # POR EQUIPE
+            # =========================
+            st.subheader("👷 Tempo Médio por Equipe")
+
+            df_por_equipe = (
+                df_tempo.groupby("recurso", as_index=False)
+                .agg(
+                    tempo_medio_execucao=("duracao_minutos", "mean"),
+                    tempo_medio_deslocamento=("deslocamento_minutos", "mean"),
+                    qtd_atividades=("ordem_servico", "count"),
+                    qtd_os=("ordem_servico", "nunique")
+                )
+                .sort_values("tempo_medio_execucao", ascending=False)
+            )
+
+            st.bar_chart(
+                df_por_equipe.set_index("recurso")[["tempo_medio_execucao", "tempo_medio_deslocamento"]],
+                use_container_width=True
+            )
+
+            st.dataframe(
+                df_por_equipe.rename(columns={
+                    "recurso": "Equipe",
+                    "tempo_medio_execucao": "Tempo Médio Execução (min)",
+                    "tempo_medio_deslocamento": "Tempo Médio Deslocamento (min)",
+                    "qtd_atividades": "Qtd Atividades",
+                    "qtd_os": "Qtd OS"
+                }),
+                use_container_width=True,
+                hide_index=True
+            )
+
+            st.divider()
+
+            # =========================
+            # POR REGIONAL
+            # =========================
+            st.subheader("📍 Tempo Médio por Regional")
+
+            df_por_regional = (
+                df_tempo.groupby("regional", as_index=False)
+                .agg(
+                    tempo_medio_execucao=("duracao_minutos", "mean"),
+                    tempo_medio_deslocamento=("deslocamento_minutos", "mean"),
+                    qtd_atividades=("ordem_servico", "count"),
+                    qtd_os=("ordem_servico", "nunique")
+                )
+                .sort_values("tempo_medio_execucao", ascending=False)
+            )
+
+            st.bar_chart(
+                df_por_regional.set_index("regional")[["tempo_medio_execucao", "tempo_medio_deslocamento"]],
+                use_container_width=True
+            )
+
+            st.dataframe(
+                df_por_regional.rename(columns={
+                    "regional": "Regional",
+                    "tempo_medio_execucao": "Tempo Médio Execução (min)",
+                    "tempo_medio_deslocamento": "Tempo Médio Deslocamento (min)",
+                    "qtd_atividades": "Qtd Atividades",
+                    "qtd_os": "Qtd OS"
+                }),
+                use_container_width=True,
+                hide_index=True
+            )
+
+            st.divider()
+
+            # =========================
+            # DETALHAMENTO
+            # =========================
+            st.subheader("📋 Detalhamento")
+
+            colf1, colf2, colf3 = st.columns(3)
+
+            with colf1:
+                equipes = ["Todas"] + sorted(df_tempo["recurso"].dropna().unique().tolist())
+                equipe_sel = st.selectbox("Equipe:", equipes, key="tempo_medio_equipe")
+
+            with colf2:
+                regionais = ["Todas"] + sorted(df_tempo["regional"].dropna().unique().tolist())
+                regional_sel_local = st.selectbox("Regional:", regionais, key="tempo_medio_regional")
+
+            with colf3:
+                atividades = ["Todas"] + sorted(df_tempo["tipo_atividade_1"].dropna().unique().tolist())
+                atividade_sel = st.selectbox("Tipo Atividade:", atividades, key="tempo_medio_atividade")
+
+            df_detalhe = df_tempo.copy()
+
+            if equipe_sel != "Todas":
+                df_detalhe = df_detalhe[df_detalhe["recurso"] == equipe_sel]
+
+            if regional_sel_local != "Todas":
+                df_detalhe = df_detalhe[df_detalhe["regional"] == regional_sel_local]
+
+            if atividade_sel != "Todas":
+                df_detalhe = df_detalhe[df_detalhe["tipo_atividade_1"] == atividade_sel]
+
+            df_detalhe = df_detalhe.rename(columns={
+                "data_servico": "Data",
+                "recurso": "Equipe",
+                "regional": "Regional",
+                "ordem_servico": "OS",
+                "tipo_atividade_1": "Tipo Atividade",
+                "status_atividade": "Status",
+                "duracao": "Duração Original",
+                "tempo_de_deslocamento": "Deslocamento Original",
+                "duracao_minutos": "Execução (min)",
+                "deslocamento_minutos": "Deslocamento (min)"
+            })
+
+            st.dataframe(
+                df_detalhe,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Execução (min)": st.column_config.NumberColumn(format="%.1f"),
+                    "Deslocamento (min)": st.column_config.NumberColumn(format="%.1f")
+                }
+            )
+
+            csv = df_detalhe.to_csv(index=False, sep=';', decimal=',')
+            st.download_button(
+                label="📥 Download CSV",
+                data=csv,
+                file_name=f"tempo_medio_atividade_{data_inicio}_a_{data_fim}.csv",
+                mime="text/csv"
+            )
 
